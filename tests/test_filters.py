@@ -49,6 +49,13 @@ def test_float64_shuffle_simd_tail_accepts_unaligned_input():
     assert mh.unshuffle(memoryview(b"x" + expected)[1:], 8) == data
 
 
+@pytest.mark.parametrize("size", [2, 6, 8, 10, 37, 38])
+def test_fused_float64_shuffle_fletcher32_simd_tail(size):
+    array = np.arange(size, dtype=np.float64) / 7.0
+    expected = mh.append_fletcher32(reference_shuffle(array.tobytes(), 8))
+    assert mh.encode_chunk(array, shuffle=True, fletcher32=True) == expected
+
+
 def test_empty_buffers_do_not_cross_ffi_as_null_pointers():
     assert mh.shuffle(b"", 8) == b""
     assert mh.unshuffle(b"", 8) == b""

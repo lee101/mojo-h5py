@@ -145,6 +145,74 @@ def fletcher32(src: BPtr, nbytes: Int) -> Int:
     return ((sum1 & 65535) << 16) | (sum2 & 65535)
 
 
+def shuffle8_fletcher32(src: BPtr, dst: BPtr, nbytes: Int):
+    comptime W = simdwidthof[DType.float64]()
+    var elements = nbytes // 8
+    if elements % 2 != 0 or nbytes > 16 * 1024 * 1024:
+        shuffle8_range(Int(src), Int(dst), elements, 0, elements)
+        var checksum = fletcher32(dst, nbytes)
+        dst[nbytes] = UInt8((checksum >> 24) & 255)
+        dst[nbytes + 1] = UInt8((checksum >> 16) & 255)
+        dst[nbytes + 2] = UInt8((checksum >> 8) & 255)
+        dst[nbytes + 3] = UInt8(checksum & 255)
+        return
+
+    var factors = SIMD[DType.int64, W](0)
+    comptime for lane in range(W):
+        if lane % 2 == 0:
+            factors[lane] = 1
+        else:
+            factors[lane] = 256
+
+    var src_words = U64Ptr(unsafe_from_address=Int(src))
+    var vector_sum1 = SIMD[DType.int64, W](0)
+    var vector_sum2 = SIMD[DType.int64, W](0)
+    var word_count = nbytes // 2
+    var element = 0
+    while element + W <= elements:
+        var input_words = src_words.load[width=W, alignment=1](element)
+        for byte_index in range(8):
+            var shift = SIMD[DType.uint64, W](8 * byte_index)
+            var output_bytes = (input_words >> shift).cast[DType.uint8]()
+            dst.store[alignment=1](byte_index * elements + element, output_bytes)
+            var contributions = output_bytes.cast[DType.int64]() * factors
+            var weights = SIMD[DType.int64, W](0)
+            comptime for lane in range(W):
+                weights[lane] = Int64(
+                    word_count
+                    - byte_index * (elements // 2)
+                    - element // 2
+                    - lane // 2
+                )
+            vector_sum1 += contributions
+            vector_sum2 += contributions * weights
+        element += W
+
+    var sum1 = Int(vector_sum1.reduce_add())
+    var sum2 = Int(vector_sum2.reduce_add())
+    while element < elements:
+        for byte_index in range(8):
+            var output_index = byte_index * elements + element
+            var value = src[8 * element + byte_index]
+            dst[output_index] = value
+            var contribution = Int(value)
+            if output_index % 2 != 0:
+                contribution <<= 8
+            sum1 += contribution
+            sum2 += (word_count - output_index // 2) * contribution
+        element += 1
+
+    while sum1 >> 16 != 0:
+        sum1 = (sum1 & 65535) + (sum1 >> 16)
+    while sum2 >> 16 != 0:
+        sum2 = (sum2 & 65535) + (sum2 >> 16)
+    var checksum = ((sum1 & 65535) << 16) | (sum2 & 65535)
+    dst[nbytes] = UInt8((checksum >> 24) & 255)
+    dst[nbytes + 1] = UInt8((checksum >> 16) & 255)
+    dst[nbytes + 2] = UInt8((checksum >> 8) & 255)
+    dst[nbytes + 3] = UInt8(checksum & 255)
+
+
 @export("mh5_shuffle")
 def mh5_shuffle(src_addr: Int, dst_addr: Int, nbytes: Int, element_size: Int) abi("C"):
     shuffle_bytes(bp(src_addr), bp(dst_addr), nbytes, element_size)
@@ -158,6 +226,11 @@ def mh5_unshuffle(src_addr: Int, dst_addr: Int, nbytes: Int, element_size: Int) 
 @export("mh5_fletcher32")
 def mh5_fletcher32(src_addr: Int, nbytes: Int) abi("C") -> Int:
     return fletcher32(bp(src_addr), nbytes)
+
+
+@export("mh5_shuffle8_fletcher32")
+def mh5_shuffle8_fletcher32(src_addr: Int, dst_addr: Int, nbytes: Int) abi("C"):
+    shuffle8_fletcher32(bp(src_addr), bp(dst_addr), nbytes)
 
 
 @export("mh5_copy_bytes")

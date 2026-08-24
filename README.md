@@ -77,7 +77,7 @@ assert np.array_equal(decoded, values)
 
 ## Benchmarks
 
-Measured with `pixi run bench` on 2026-07-29 using an Intel Xeon E5-2697 v4 at
+Measured with `pixi run bench` on 2026-08-24 using an Intel Xeon E5-2697 v4 at
 2.30 GHz, Linux 6.8.0-136-generic. Each case processes a 16 MiB float64 array
 with 256 x 256 chunks; numbers are the best of three end-to-end file operations.
 "Mojo speed" is h5py time divided by mojo-h5py time, so values below 1.00x mean
@@ -85,19 +85,22 @@ h5py is faster.
 
 | case | mojo-h5py | h5py | Mojo speed |
 |---|---:|---:|---:|
-| write: shuffle + Fletcher32 | 38.3 ms | 58.0 ms | 1.52x |
-| read: shuffle + Fletcher32 | 17.8 ms | 30.9 ms | 1.73x |
-| write: gzip-1 + shuffle + Fletcher32 | 222.0 ms | 775.0 ms | 3.49x |
-| read: gzip-1 + shuffle + Fletcher32 | 16.5 ms | 51.9 ms | 3.14x |
+| write: shuffle + Fletcher32 | 52.5 ms | 76.7 ms | 1.46x |
+| read: shuffle + Fletcher32 | 12.7 ms | 29.6 ms | 2.33x |
+| write: gzip-1 + shuffle + Fletcher32 | 205.6 ms | 545.5 ms | 2.65x |
+| read: gzip-1 + shuffle + Fletcher32 | 19.1 ms | 64.3 ms | 3.37x |
 
 The float64 shuffle/unshuffle and Fletcher32 kernels use SIMD with unaligned-safe
-loads and scalar tails. Datasets of at least 4 MiB process independent chunks
-with four workers; smaller operations remain serial. Fused shuffle/checksum
-buffers and direct decode into NumPy-owned arrays avoid full-chunk copies, and
+loads and scalar tails. The common float64 shuffle-plus-Fletcher32 write pipeline
+is fused: checksum contributions are reduced from the same vectors that write the
+shuffled bytes, avoiding a second pass and a second FFI call. Datasets of at least
+4 MiB process independent chunks with four workers; smaller operations remain
+serial. Direct decode into NumPy-owned arrays avoids full-chunk copies, and
 parallel work is bounded to eight in-flight chunks.
 
-No GPU path is provided. Shuffle and Fletcher32 are memory-bound, while gzip is
-a branch-heavy zlib operation rather than a high-intensity numeric kernel.
+No GPU path is provided. None of the native kernels has the arithmetic intensity
+needed to amortize host/device transfers: shuffle and Fletcher32 are streaming,
+memory-bound transforms, while gzip is a branch-heavy zlib operation.
 
 ## How it works
 

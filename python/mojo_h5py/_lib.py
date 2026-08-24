@@ -16,6 +16,7 @@ _SIGNATURES = {
     "mh5_shuffle": ([I, I, I, I], None),
     "mh5_unshuffle": ([I, I, I, I], None),
     "mh5_fletcher32": ([I, I], I),
+    "mh5_shuffle8_fletcher32": ([I, I, I], None),
     "mh5_copy_bytes": ([I, I, I], None),
 }
 

@@ -98,6 +98,20 @@ def _append_fletcher32_array(
     return result
 
 
+def _shuffle8_fletcher32_array(
+    data: bytes | bytearray | memoryview,
+) -> np.ndarray:
+    source = _bytes_array(data)
+    if source.size % 8:
+        raise ValueError("data length must be divisible by itemsize")
+    result = np.empty(source.size + 4, dtype=np.uint8)
+    if source.size:
+        lib().mh5_shuffle8_fletcher32(address(source), address(result), source.size)
+    else:
+        result[:] = 0
+    return result
+
+
 def _verified_payload_view(data: bytes | bytearray | memoryview) -> memoryview:
     raw = memoryview(data).cast("B")
     if raw.nbytes < 4:
@@ -177,6 +191,14 @@ def encode_pipeline_buffer(
         for index, (filter_id, options) in enumerate(pipeline)
         if not filter_mask & (1 << index)
     ]
+    if (
+        itemsize == 8
+        and len(active) == 2
+        and active[0][0] == FILTER_SHUFFLE
+        and (not active[0][1] or active[0][1][0] == 8)
+        and active[1][0] == FILTER_FLETCHER32
+    ):
+        return _shuffle8_fletcher32_array(raw)
     position = 0
     while position < len(active):
         filter_id, options = active[position]
